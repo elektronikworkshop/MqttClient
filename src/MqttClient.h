@@ -24,85 +24,8 @@
 
 #include <StreamCmd.h>
 #include <TelnetServer.h>
-#include <FlashSettings.h>
-
-#ifndef DefaultHostName
-#  define DefaultHostName "mqtt-client"
-#endif
-
-#ifndef DefaultTelnetPass
-#  define DefaultTelnetPass "h4ckm3"
-#endif
-
-#ifndef DefaultMqttPort
-#  define DefaultMqttPort 1883
-#endif
-
-const unsigned int MaxWifiSsidLen = 63; // excluding zero termination
-const unsigned int MaxWifiPassLen = 63; // excluding zero termination
-const unsigned int MaxHostNameLen = 63; // excluding zero termination
-const unsigned int MaxTelnetPassLen = 63; // excluding zero termination
-const unsigned int MinTelnetPassLen =  5;
-
-const unsigned int MaxMqttServerNameLen = 63;// excluding zero termination
-const unsigned int MaxMqttUserNameLen = 63;// excluding zero termination
-const unsigned int MaxMqttPassLen = 63; // excluding zero termination
-const unsigned int MaxMqttClientNameLen = 63; // excluding zero termination
-
-// TODO: generate default host name from MAC address
-// mqtt-client-a38fb1b2 or so
-
-struct FlashDataMqttClient
-  : public FlashDataBase
-{
-  char wifiSsid[MaxWifiSsidLen + 1];
-  char wifiPass[MaxWifiPassLen + 1];
-
-  char hostName[MaxHostNameLen + 1];
-  bool telnetEnabled;
-  char telnetPass[MaxTelnetPassLen + 1];
-
-  bool debug;
-
-  char mqttServer[MaxMqttServerNameLen + 1];
-  uint16_t mqttPort;
-  char mqttUser[MaxMqttUserNameLen + 1];
-  char mqttPass[MaxMqttPassLen + 1];
-  char mqttClientName[MaxMqttClientNameLen + 1];
-  
-
-  FlashDataMqttClient()
-    /* router SSID */
-    : wifiSsid{""}
-    /* router password */
-    , wifiPass{""}
-      
-    , hostName{DefaultHostName}
-    , telnetEnabled(true)
-    , telnetPass{DefaultTelnetPass}
-
-    , debug(false)
-
-    , mqttServer{""}
-    , mqttPort(DefaultMqttPort)
-    , mqttUser{""}
-    , mqttPass{""}
-    , mqttClientName{""}
-    
-  { }
-};
-
-
-/* We could use an abstract FlashSettings interface class as well as we do
- * here with the NetworkManager
- */
-
-class NetworkManager
-{
-public:
-  virtual void connect(void) = 0;
-  virtual void disconnect(void) = 0;
-};
+#include <MqttFlash.h>
+#include <MqttNetwork.h>
 
 template<class FlashSettingsType,
          size_t _NumCommandSets    =   2,
@@ -116,7 +39,7 @@ class CliMqttClient
                      _MaxCommandSize>
 {
 private:
-  
+
 protected:
   FlashSettingsType &m_flashSettings;
   NetworkManager &m_networkManager;
@@ -155,14 +78,10 @@ public:
      */
     addCommand("help",      &CliMqttClient::cmdHelp);
     addCommand(".",         &CliMqttClient::cmdHelp);
-//    addCommand("l.",        &Cli::cmdHelp);
     addCommand("n.",        &CliMqttClient::cmdHelp);
-    
-//    addCommand("time",      &Cli::cmdTime);
-//    addCommand("hist",      &Cli::cmdHist);
+
     addCommand("debug",     &CliMqttClient::cmdDebug);
-//    addCommand("version",   &Cli::cmdVersion);
-  
+
     addCommand("n.rssi",    &CliMqttClient::cmdNetworkRssi);
     addCommand("n.list",    &CliMqttClient::cmdNetworkList);
     addCommand("n.ssid",    &CliMqttClient::cmdNetworkSsid);
@@ -172,6 +91,7 @@ public:
     addCommand("n.connect", &CliMqttClient::cmdNetworkConnect);
     addCommand("n.host",    &CliMqttClient::cmdNetworkHostName);
     addCommand("n.telnet",  &CliMqttClient::cmdNetworkTelnet);
+    addCommand("n.info",    &CliMqttClient::cmdNetworkInfo);
 
     addCommand("m.server", &CliMqttClient::cmdMqttServer);
     addCommand("m.port", &CliMqttClient::cmdMqttPort);
@@ -187,40 +107,31 @@ public:
     return printHex(stream(), data, len);
   }
 
-  static Print& printHex(Print &s, const uint8_t *data, uint8_t len)
+  static Print& printHex(Print &s, const uint8_t *data, uint8_t len, const char* sep = " ")
   {
     for (uint8_t i = 0; i < len; i++) {
       char buf[4] = {0};
       sprintf(buf, "%02x", data[i]);
       s.print(buf);
-      s.print(i == len - 1 ? "" : " ");
+      s.print(i == len - 1 ? "" : sep);
     }
     return s;
   }
-  
-protected:  
-  
+
+protected:
+
   /* Serial command interface */
-  
+
   virtual const char* helpGeneral(void)
   {
     return
-  "help\n"
-  "  print this help\n"
-  "time\n"
-  "  display current time\n"
-  "hist [a] [b]\n"
-  "  print error history. with no arguments the first few entries are displayed\n"  // TODO: we should rather print the last few...
-  "    hist [a] prints the first [a] entries, [a] == -1 prints the whole history\n"
-  "    hist [a] [b] prints the history between entries [a] and [b]\n"
-  "      if [b] is -1 all entries from [a] up to the end are printed\n"
-  "debug [on|off]\n"
-  "  no argument: show if debug logging is enabled\n"
-  "     on  enable debug logging\n"
-  "    off  disable debug logging\n"
-  "version\n"
-  "  print IG-OS version\n"
-  ;
+    "help\n"
+    "  print this help\n"
+    "debug [on|off]\n"
+    "  no argument: show if debug logging is enabled\n"
+    "     on  enable debug logging\n"
+    "    off  disable debug logging\n"
+    ;
   }
 
   virtual const char* helpNetwork()
@@ -250,7 +161,30 @@ protected:
   "      disables the telnet server\n"
   "    pass <pass>\n"
   "      sets the telnet login password to <password>\n"
+  "n.info\n"
+  " print network setup info\n"
   ;
+  }
+
+  virtual const char* helpMqtt()
+  {
+    return
+    "m.server [server url]\n"
+    "  with argument: set MQTT server\n"
+    "  without: show current MQTT server\n"
+    "n.port [port]\n"
+    "  with argument: set MQTT server port\n"
+    "  without: show current MQTT server port\n"
+    "m.user [user]\n"
+    "  with argument: set MQTT user name\n"
+    "  without: show current MQTT user name\n"
+    "m.pass [pass]\n"
+    "  with argument: set MQTT user password\n"
+    "  without: show current MQTT user password\n"
+    "m.client [client]\n"
+    "  with argument: set MQTT client name\n"
+    "  without: show current MQTT client name\n"
+    ;
   }
 
   /* TODO: add interface for customizing inherited help */
@@ -262,6 +196,8 @@ protected:
       stream() << helpGeneral();
     } else if (strncmp(arg, "n.", 2) == 0) {
       stream() << helpNetwork();
+    } else if (strncmp(arg, "m.", 2) == 0) {
+      stream() << helpMqtt();
     } else {
       stream()
         << "----------------\n"
@@ -272,16 +208,7 @@ protected:
         ;
     }
   }
-/*
-  void cmdHist()
-  {
-    int start = 0, end = 0;
-    getInt(start, -1, INT_MAX);
-    getInt(end, -1, INT_MAX);
 
-    Error.print(stream(), start, end);
-  }
-*/
   void cmdDebug()
   {
     enum {OFF = 0, ON};
@@ -314,7 +241,7 @@ protected:
         stream() << "invalid arguments\n";
         return;
     }
-// TODO  
+// TODO
 //    Debug.enable(m_flashSettings.debug);
     m_flashSettings.update();
   }
@@ -323,13 +250,14 @@ protected:
   {
     PrintVersion(stream());
   }
-  
+
+  // networking commands
+
   void cmdNetworkRssi()
   {
     stream() << "RSSI: " << WiFi.RSSI() << " dB\n";
   }
-  
-  
+
   void cmdNetworkSsid()
   {
     const char* arg;
@@ -351,10 +279,10 @@ protected:
     }
     strncpy(m_flashSettings.wifiSsid, arg, MaxWifiSsidLen);
     m_flashSettings.update();
-  
+
     stream() << "SSID \"" << arg << "\" stored to flash\n";
   }
-  
+
   void cmdNetworkPass()
   {
     const char* arg;
@@ -377,21 +305,21 @@ protected:
     }
     strncpy(m_flashSettings.wifiPass, arg, MaxWifiPassLen);
     m_flashSettings.update();
-  
+
     stream() << "wifi pass \"" << arg << "\" stored to flash\n";
   }
-  
+
   void cmdNetworkConnect()
   {
     m_networkManager.disconnect();
     m_networkManager.connect();
   }
-  
+
   void cmdNetworkList()
   {
     byte n = WiFi.scanNetworks();
     if (n) {
-      stream() << "visible network SSIDs:\n";     
+      stream() << "visible network SSIDs:\n";
       for (int i = 0; i < n; i++) {
         stream() << "  " << WiFi.SSID(i) << " (" << WiFi.RSSI(i) << " dB)\n";
       }
@@ -410,10 +338,10 @@ protected:
       stream() << "the host name can not be empty\n";
       return;
     }
-    
+
     strncpy(m_flashSettings.hostName, arg, MaxHostNameLen);
     m_flashSettings.update();
-  
+
     stream() << "new host name \"" << arg << "\" stored to flash. restarting network...\n";
 
     m_networkManager.disconnect();
@@ -460,7 +388,7 @@ protected:
         }
         break;
       case ArgNone:
-        stream() << "the telnet server is " << (m_flashSettings.telnetEnabled ? "on" : "off") << ", the login password is \"" << m_flashSettings.telnetPass << "\"\n"; 
+        stream() << "the telnet server is " << (m_flashSettings.telnetEnabled ? "on" : "off") << ", the login password is \"" << m_flashSettings.telnetPass << "\"\n";
         return;
       default:
         stream() << "invalid argument \"" << current() << "\", see \"help\" for proper use\n";
@@ -469,6 +397,41 @@ protected:
 
     m_flashSettings.update();
   }
+
+  void cmdNetworkInfo()
+  {
+    uint8_t mac[6];
+    WiFi.macAddress(mac);
+    #define confi(x) (strlen(x) ? x : "not configured")
+    stream()
+      << "MAC:              "; printHex(stream(), mac, sizeof(mac), ":") << "\n"
+      << "SSID:             " << m_flashSettings.wifiSsid << "\n"
+#if defined(ARDUINO_ARCH_ESP8266)
+      << "host name:        " << WiFi.hostname() << "\n"
+#elif defined(ARDUINO_ARCH_ESP32)
+      << "host name:        " << WiFi.getHostname() << "\n"
+#endif
+      << "MQTT server:      " << confi(m_flashSettings.mqttServer) << "\n"
+      << "MQTT user:        " << confi(m_flashSettings.mqttUser) << "\n"
+      << "MQTT client name: " << confi(m_flashSettings.mqttClientName) << "\n"
+      ;
+    if (WiFi.status() == WL_CONNECTED) {
+      stream()
+        << "WiFi:             connected\n"
+        << "signal strength:  " << WiFi.RSSI() << " dB\n"
+        << "IP:               " << WiFi.localIP() << "\n"
+        ;
+      if (strlen(m_flashSettings.mqttServer)) {
+        stream()
+          << "MQTT server " << (m_networkManager.getMqttClient().connected() ? "" : "dis") << "connected" << "\n";
+      }
+    } else {
+      stream()
+        << "WiFi:             disconnected\n"
+        ;
+    }
+  }
+  // MQTT commands
 
   void cmdMqttServer()
   {
@@ -482,20 +445,20 @@ protected:
       stream() << "the MQTT server name can not be empty\n";
       return;
     }
-    
+
     strncpy(m_flashSettings.mqttServer, arg, MaxMqttServerNameLen);
     m_flashSettings.update();
-  
+
     stream() << "new MQTT server name \"" << arg << "\" stored to flash. restarting mqtt...\n";
 
     /* TODO mqtt restart */
   }
-  
+
   void cmdMqttPort()
   {
     /* TODO */
   }
-  
+
   void cmdMqttUser()
   {
     const char* arg = next();
@@ -513,9 +476,9 @@ protected:
     strncpy(m_flashSettings.mqttUser, arg, MaxMqttUserNameLen);
     m_flashSettings.update();
 
-    /* TODO restart MQTT */ 
+    /* TODO restart MQTT */
   }
-  
+
   void cmdMqttPass()
   {
     const char* arg = next();
@@ -535,7 +498,7 @@ protected:
 
     /* TODO restart MQTT */
   }
-  
+
   void cmdMqttClient()
   {
     const char* arg = next();
@@ -553,10 +516,10 @@ protected:
     strncpy(m_flashSettings.mqttClientName, arg, MaxMqttClientNameLen);
     m_flashSettings.update();
 
-    /* TODO restart MQTT */ 
+    /* TODO restart MQTT */
   }
 
-  
+
   void cmdInvalid(const char *command)
   {
     if (strlen(command)) {
@@ -569,4 +532,3 @@ protected:
 
 
 #endif /* _EW_MQTT_CLIENT_H_ */
-
