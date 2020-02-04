@@ -79,15 +79,18 @@ public:
     addCommand("help",      &CliMqttClient::cmdHelp);
     addCommand(".",         &CliMqttClient::cmdHelp);
     addCommand("n.",        &CliMqttClient::cmdHelp);
+    addCommand("m.",        &CliMqttClient::cmdHelp);
 
     addCommand("debug",     &CliMqttClient::cmdDebug);
+    addCommand("reboot",    &CliMqttClient::cmdReboot);
 
     addCommand("n.rssi",    &CliMqttClient::cmdNetworkRssi);
     addCommand("n.list",    &CliMqttClient::cmdNetworkList);
     addCommand("n.ssid",    &CliMqttClient::cmdNetworkSsid);
-    addCommand("n.ssidr",    &CliMqttClient::cmdNetworkSsid); /* undocumented wifi SSID reset */
+    addCommand("n.ssidr",   &CliMqttClient::cmdNetworkSsid); /* undocumented wifi SSID reset */
     addCommand("n.pass",    &CliMqttClient::cmdNetworkPass);
-    addCommand("n.passr",    &CliMqttClient::cmdNetworkPass); /* undocumented wifi pass reset */
+    addCommand("n.passr",   &CliMqttClient::cmdNetworkPass); /* undocumented wifi pass reset */
+    addCommand("n.roaming", &CliMqttClient::cmdNetworkRoaming);
     addCommand("n.connect", &CliMqttClient::cmdNetworkConnect);
     addCommand("n.host",    &CliMqttClient::cmdNetworkHostName);
     addCommand("n.telnet",  &CliMqttClient::cmdNetworkTelnet);
@@ -120,6 +123,31 @@ public:
 
 protected:
 
+  /** Set MQTT topic/name within flash settings with the current command
+   * line argument.
+   * If no error occurs, the topic is set and flash settings are written.
+   * @param topicInFlash Pointer to the buffer in the flash settings
+   * @param what Just for CLI feedback what we're setting, e.g. "topic" or "name"
+   * @param maxLen Maximum length of the topic/name string
+   */
+  bool setFlashStringFromArg(char *topicInFlash, uint8_t maxLen, const char *what)
+  {
+    const char *arg = next();
+    if (not arg or strlen(arg) == 0) {
+      stream() << "invalid or no " << what << " provided\n";
+      return false;
+    }
+    auto len = strlen(arg);
+    if (len > maxLen) {
+      stream() << what << " is too long - " << len << " (allowed " << maxLen << ")\n";
+      return false;
+    }
+    strncpy(topicInFlash, arg, maxLen);
+    m_flashSettings.update();
+    stream() << what << " set to " << arg << "\n";
+    return true;
+  }
+
   /* Serial command interface */
 
   virtual const char* helpGeneral(void)
@@ -131,6 +159,8 @@ protected:
     "  no argument: show if debug logging is enabled\n"
     "     on  enable debug logging\n"
     "    off  disable debug logging\n"
+    "reboot\n"
+    "  reboot system\n"
     ;
   }
 
@@ -139,8 +169,12 @@ protected:
     return
   "n.rssi\n"
   "  display the current connected network strength (RSSI)\n"
-  "n.list\n"
+  "n.list [option]\n"
   "  list the visible networks\n"
+  "    [option] can be one of:\n"
+  "     -a show all additional info of networks\n"
+  "     -b show BSSID of networks\n"
+  "     -c show channel of networks\n"
   "n.ssid [ssid]\n"
   "  with argument: set wifi SSID\n"
   "  without: show current wifi SSID\n"
@@ -152,6 +186,8 @@ protected:
   "  sets a new host name when called with argument\n"
   "n.connect\n"
   "  connect to configured wifi network\n"
+  "n.roaming [on|off]\n"
+  "  en-/disable wifi roaming (bind to bssid based on best rssi)\n"
   "n.telnet [params]\n"
   "  without [params] this prints the telnet configuration\n"
   "  with [params] the telnet server can be configured as follows\n"
@@ -172,7 +208,7 @@ protected:
     "m.server [server url]\n"
     "  with argument: set MQTT server\n"
     "  without: show current MQTT server\n"
-    "n.port [port]\n"
+    "m.port [port]\n"
     "  with argument: set MQTT server port\n"
     "  without: show current MQTT server port\n"
     "m.user [user]\n"
@@ -246,6 +282,13 @@ protected:
     m_flashSettings.update();
   }
 
+  void cmdReboot(void)
+  {
+    stream() << "rebooting...\n";
+    stream().flush();
+    ESP.restart();
+  }
+
   void cmdVersion()
   {
     PrintVersion(stream());
@@ -315,13 +358,55 @@ protected:
     m_networkManager.connect();
   }
 
+  void cmdNetworkRoaming(void)
+  {
+    enum {OP_OFF = 0, OP_ON, OP_NONE};
+    size_t op(OP_NONE);
+    getOpt(op, "off", "on");
+    switch (op)
+    {
+    case OP_ON:
+    case OP_OFF:
+    {
+      bool ena = op == OP_ON;
+      if (ena != m_flashSettings.wifiRoamingEnabled) {
+        m_flashSettings.wifiRoamingEnabled = ena;
+        m_flashSettings.update();
+        stream() << "wifi roaming switched " << (m_flashSettings.wifiRoamingEnabled ? "on\n" : "off\n");
+      } else {
+        stream() << "wifi roaming already " << (ena ? "on\n" : "off\n");
+      }      
+      break;
+    }
+    case OP_NONE:
+      stream() << "wifi roaming " << (m_flashSettings.wifiRoamingEnabled ? "on\n" : "off\n");
+      break;
+    }
+  }
+
   void cmdNetworkList()
   {
+    enum {
+      OP_ALL = 0,
+      OP_BSSID,
+      OP_CHANNEL,
+      OP_NONE
+    };
+    size_t op(OP_NONE);
+    getOpt(op, "-a", "-b", "-c");
+    
     byte n = WiFi.scanNetworks();
     if (n) {
-      stream() << "visible network SSIDs:\n";
+      stream() << "visible networks:\n";
       for (int i = 0; i < n; i++) {
-        stream() << "  " << WiFi.SSID(i) << " (" << WiFi.RSSI(i) << " dB)\n";
+        stream() 
+          << WiFi.SSID(i) << " @ " << WiFi.RSSI(i) << " dB\n";
+        if (op == OP_ALL or op == OP_BSSID) {
+          stream()
+          << "     bssid: " << WiFi.BSSIDstr(i) << "\n";}
+        if (op == OP_ALL or op == OP_CHANNEL) {
+          stream()
+          << "   channel: " << WiFi.channel(i) << "\n";}
       }
     }
   }

@@ -34,6 +34,7 @@ struct FlashDataMqttClient
 {
   char wifiSsid[MaxWifiSsidLen + 1];
   char wifiPass[MaxWifiPassLen + 1];
+  bool wifiRoamingEnabled;
 
   char hostName[MaxHostNameLen + 1];
   bool telnetEnabled;
@@ -47,12 +48,12 @@ struct FlashDataMqttClient
   char mqttPass[MaxMqttPassLen + 1];
   char mqttClientName[MaxMqttClientNameLen + 1];
 
-
   FlashDataMqttClient()
     /* router SSID */
     : wifiSsid{""}
     /* router password */
     , wifiPass{""}
+    , wifiRoamingEnabled(false)
 
     , hostName{DefaultHostName}
     , telnetEnabled(true)

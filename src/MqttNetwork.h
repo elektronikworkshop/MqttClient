@@ -78,12 +78,13 @@ public:
         if (WiFi.status() == WL_CONNECTED) {
           m_print
             << "WiFi connected to:   " << m_flashData.wifiSsid << "\n"
-            << "signal strength:     " << WiFi.RSSI() << " dB\n"
-            << "IP:                  " << WiFi.localIP() << "\n"
+            << "signal strength:     " << WiFi.RSSI()          << " dB\n"
+            << "BSSID:               " << WiFi.BSSIDstr()      << "\n"
+            << "IP:                  " << WiFi.localIP()       << "\n"
             #if defined(ARDUINO_ARCH_ESP8266)
-            << "host name:           " << WiFi.hostname() << "\n"
+            << "host name:           " << WiFi.hostname()      << "\n"
             #elif defined(ARDUINO_ARCH_ESP32)
-            << "host name:           " << WiFi.getHostname() << "\n"
+            << "host name:           " << WiFi.getHostname()   << "\n"
             #endif
             ;
           if (not strlen(m_flashData.mqttServer)) {
@@ -135,6 +136,8 @@ public:
       return;
     }
 
+    m_connectStartMs = millis();
+
     if (strlen(m_flashData.wifiSsid) == 0 or strlen(m_flashData.wifiPass) == 0) {
       m_print << "WiFi SSID (\"" << m_flashData.wifiSsid << "\") or password (\"" << m_flashData.wifiPass << "\") not set:\n  can not connect to network.\n  please set up your SSID and password\n";
 
@@ -143,20 +146,56 @@ public:
       return;
     }
 
-    m_connectStartMs = millis();
-
     // Set WiFi mode to station (as opposed to AP or AP_STA)
     WiFi.mode(WIFI_STA);
 #if defined(ARDUINO_ARCH_ESP8266)
     // https://github.com/esp8266/Arduino/issues/2826
     WiFi.hostname(myHostName());
 #endif
-    WiFi.begin(m_flashData.wifiSsid, m_flashData.wifiPass);
+    wifiBegin(m_flashData.wifiSsid,
+              m_flashData.wifiPass,
+              m_flashData.wifiRoamingEnabled);
 #if defined(ARDUINO_ARCH_ESP32)
     WiFi.setHostname(myHostName());
 #endif
 
     m_state = StateConnecting;
+  }
+  
+  void
+  wifiBegin(const char *ssid, const char *pass, bool roaming)
+  {
+    if (roaming) {
+      m_print << "roaming for " << ssid << ":\n";
+      byte n = WiFi.scanNetworks();
+      int32_t bestRssi = INT32_MIN;
+      int32_t bestIdx = -1;
+      for (byte i = 0; i < n; i++) {
+        if (strcmp(ssid, WiFi.SSID(i).c_str()) == 0) {
+          auto rssi = WiFi.RSSI(i);
+
+          bool better = rssi > bestRssi;
+
+          m_print << (better ? " + " : " - ") << WiFi.BSSIDstr(i) << " @ " << rssi << " dB\n";
+
+          if (better) {
+            bestRssi = rssi;
+            bestIdx = i;
+          }
+        }
+      }
+      if (bestIdx >= 0) {
+        WiFi.begin(ssid,
+                   pass,
+                   0 /* channel */,
+                   WiFi.BSSID(bestIdx));
+        return;
+      }
+      m_print << "network not found - falling back to regular operation\n";
+      // No entry found in scan list, falling back to non-roaming
+    }
+
+    WiFi.begin(ssid, pass);
   }
 
   void
