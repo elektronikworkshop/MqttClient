@@ -77,6 +77,7 @@ public:
      */
     addCommand("help",      &CliMqttClient::cmdHelp);
     addCommand(".",         &CliMqttClient::cmdHelp);
+    addCommand("?",         &CliMqttClient::cmdHelp);
     addCommand("n.",        &CliMqttClient::cmdHelp);
     addCommand("m.",        &CliMqttClient::cmdHelp);
 
@@ -163,7 +164,7 @@ protected:
     ;
   }
 
-  virtual const char* helpNetwork()
+  virtual const char* helpNetwork(void)
   {
     return
   "n.rssi\n"
@@ -201,7 +202,7 @@ protected:
   ;
   }
 
-  virtual const char* helpMqtt()
+  virtual const char* helpMqtt(void)
   {
     return
     "m.server [server url]\n"
@@ -222,8 +223,7 @@ protected:
     ;
   }
 
-  /* TODO: add interface for customizing inherited help */
-  virtual void cmdHelp()
+  virtual void cmdHelp(void)
   {
     const char* arg = current();
 
@@ -239,7 +239,9 @@ protected:
         << helpGeneral()
         << "NETWORK\n"
         << helpNetwork()
-        << "----------------\n"
+        << "MQTT\n"
+        << helpMqtt()
+       << "----------------\n"
         ;
     }
   }
