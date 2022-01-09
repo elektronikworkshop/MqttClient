@@ -1,5 +1,4 @@
-#ifndef _EW_MQTT_CLIENT_FLASH_H_
-#define _EW_MQTT_CLIENT_FLASH_H_
+#pragma once
 
 #include <FlashSettings.h>
 
@@ -70,4 +69,3 @@ struct FlashDataMqttClient
   { }
 };
 
-#endif // _EW_MQTT_CLIENT_FLASH_H_
