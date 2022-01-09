@@ -1,5 +1,4 @@
-#ifndef EW_IG_NETWORK_H
-#define EW_IG_NETWORK_H
+#pragma once
 
 #include <MqttFlash.h>
 
@@ -113,7 +112,6 @@ public:
         if (WiFi.status() != WL_CONNECTED) {
           m_print << "WiFi connection lost\n";
           m_state = StateDisconnected;
-          // event...
           if (m_disconnectCallback) {
             m_disconnectCallback();
           }
@@ -207,6 +205,8 @@ public:
 
     WiFi.disconnect();
     m_state = StateDisconnected;
+
+    // invoke disconnect callback?
   }
 
   State
@@ -247,6 +247,15 @@ public:
       hostName = DefaultHostName;
     }
     return hostName;
+  }
+
+  void setConnectCallback(Callback connectCallback)
+  {
+     m_connectCallback = connectCallback;
+  }
+  void setDisconnectCallback(Callback disconnectCallback)
+  {
+     m_disconnectCallback = disconnectCallback;
   }
 
 private:
@@ -306,7 +315,6 @@ private:
     }
   }
 
-
   State m_state;
   unsigned long m_connectStartMs;
   unsigned long m_connectTimeoutMs;
@@ -329,6 +337,3 @@ private:
  * https://tttapa.github.io/ESP8266/Chap08%20-%20mDNS.html
  */
 
-
-
-#endif /* EW_IG_NETWORK_H */
