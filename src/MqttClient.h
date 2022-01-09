@@ -19,8 +19,7 @@
  * along with this library.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#ifndef _EW_MQTT_CLIENT_H_
-#define _EW_MQTT_CLIENT_H_
+#pragma once
 
 #include <StreamCmd.h>
 #include <TelnetServer.h>
@@ -614,6 +613,3 @@ protected:
 
 };
 
-
-
-#endif /* _EW_MQTT_CLIENT_H_ */
